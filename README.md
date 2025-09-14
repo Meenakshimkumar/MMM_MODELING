@@ -57,10 +57,6 @@ MMM_MODELING/
 │           └── test_predictions_xgb.csv
 │           └── test_predictions.csv
 # Reproducible notebook (can run in Jupyter/VSCode)
-├── outputs/
-│   ├── ridge_revenue_model.joblib  # Saved Ridge model (Stage 2)
-│   ├── ridge_google_model.joblib   # Saved Ridge model (Stage 1)
-│   └── plots/                      # Diagnostic plots
 └── README.md                       # Project overview & instructions
 
 ```
