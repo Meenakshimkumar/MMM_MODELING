@@ -44,13 +44,25 @@ MMM_MODELING/
 │   └── raw/
 │       └── weekly_data.csv         # Input dataset
 ├── notebooks/
-│   └── MMM_modeling_notebook.py    # Reproducible notebook (can run in Jupyter/VSCode)
+│   └── MMM_modeling_notebook.py
+│   └── MMM_MODELING/
+│       └── outputs/
+│           └── plots/
+│               └── residuals.png
+│               └── residuals_acf.png
+│           └── ridge_google_model.joblib
+│           └── ridge_revenue_model.joblib
+│           └── sensitivity_price.csv
+│           └── sensitivity_promotions.txt
+│           └── test_predictions_xgb.csv
+│           └── test_predictions.csv
+# Reproducible notebook (can run in Jupyter/VSCode)
 ├── outputs/
 │   ├── ridge_revenue_model.joblib  # Saved Ridge model (Stage 2)
 │   ├── ridge_google_model.joblib   # Saved Ridge model (Stage 1)
 │   └── plots/                      # Diagnostic plots
-├── README.md                       # Project overview & instructions
-└── MMM_Assessment_Report.docx      # Short report (2–3 pages)
+└── README.md                       # Project overview & instructions
+
 ```
 
 ---
