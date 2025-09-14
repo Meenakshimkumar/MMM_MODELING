@@ -1,7 +1,5 @@
 # MMM Marketing Mix Modeling with Mediation (Google as mediator)
-# Dataset columns: 
-# week, facebook_spend, google_spend, tiktok_spend, instagram_spend, snapchat_spend,
-# social_followers, average_price, promotions, emails_send, sms_send, revenue
+# Enhanced with output saving
 
 # %%
 # 1) SETUP
@@ -16,10 +14,14 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error
 import xgboost as xgb
 import statsmodels.api as sm
+import joblib
 from IPython.display import display
 
 RANDOM_STATE = 42
 np.random.seed(RANDOM_STATE)
+
+# Ensure output folders exist
+os.makedirs("MMM_MODELING/outputs/plots", exist_ok=True)
 
 # %%
 # 2) LOAD DATA
@@ -34,10 +36,8 @@ else:
 
 # %%
 # 3) BASIC PREP
-# Create a proper date index (assuming 'week' is week number)
 df['date'] = pd.date_range(start="2020-01-01", periods=len(df), freq="W")
 
-# Define columns
 revenue_col = 'revenue'
 google_col = 'google_spend'
 social_cols = ['facebook_spend', 'tiktok_spend', 'instagram_spend', 'snapchat_spend']
@@ -76,10 +76,11 @@ n = len(data)
 train_end = int(n*0.8)
 train = data.iloc[:train_end].copy()
 test = data.iloc[train_end:].copy()
+
 print('Train weeks:', len(train), 'Test weeks:', len(test))
 
 # %%
-# 6) STAGE 1: MEDIATION MODEL (Predict Google spend from social)
+# 6) STAGE 1: MEDIATION MODEL
 stage1_feats = social_cols + ['t','sin52','cos52']
 X1 = train[stage1_feats]
 y1 = train[google_col]
@@ -87,7 +88,9 @@ y1 = train[google_col]
 ridge1 = Ridge(random_state=RANDOM_STATE)
 ridge1.fit(X1, y1)
 
-# Predict Google for whole dataset
+# Save Stage 1 model
+joblib.dump(ridge1, "MMM_MODELING/outputs/ridge_google_model.joblib")
+
 data['pred_google'] = ridge1.predict(data[stage1_feats])
 print("Stage 1 complete — Google spend modeled as mediator")
 
@@ -95,7 +98,7 @@ print("Stage 1 complete — Google spend modeled as mediator")
 # 7) STAGE 2: REVENUE MODEL
 features = []
 features.append('pred_google')
-features += [f'log_{c}' for c in social_cols]  # direct social effects
+features += [f'log_{c}' for c in social_cols]
 features += extras
 features += ['t','sin52','cos52']
 
@@ -107,10 +110,12 @@ y_train = y.iloc[:train_end]
 X_test = X.iloc[train_end:]
 y_test = y.iloc[train_end:]
 
-# RidgeCV with alpha tuning
 alphas = np.logspace(-3,3,13)
 ridge_cv = RidgeCV(alphas=alphas, store_cv_results=True)
 ridge_cv.fit(X_train, y_train)
+
+# Save Stage 2 model
+joblib.dump(ridge_cv, "MMM_MODELING/outputs/ridge_revenue_model.joblib")
 
 y_pred_test = ridge_cv.predict(X_test)
 rmse_log = np.sqrt(mean_squared_error(y_test, y_pred_test))
@@ -120,8 +125,16 @@ print("Ridge alpha:", ridge_cv.alpha_)
 print("Test RMSE (log):", rmse_log)
 print("Test RMSE (revenue):", rmse_rev)
 
+# Save predictions
+results = pd.DataFrame({
+    "date": data['date'].iloc[train_end:],
+    "actual_revenue": np.expm1(y_test),
+    "predicted_revenue": np.expm1(y_pred_test)
+})
+results.to_csv("MMM_MODELING/outputs/test_predictions.csv", index=False)
+
 # %%
-# 8) XGBOOST MODEL (Non-linear)
+# 8) XGBOOST MODEL
 dtrain = xgb.DMatrix(X_train, label=y_train)
 dtest = xgb.DMatrix(X_test, label=y_test)
 
@@ -134,6 +147,14 @@ model_xgb = xgb.train(params, dtrain, num_boost_round=500,
 ypred_xgb = model_xgb.predict(dtest)
 print("XGBoost Test RMSE (log):", np.sqrt(mean_squared_error(y_test, ypred_xgb)))
 
+# Save XGBoost predictions
+xgb_results = pd.DataFrame({
+    "date": data['date'].iloc[train_end:],
+    "actual_revenue": np.expm1(y_test),
+    "predicted_revenue_xgb": np.expm1(ypred_xgb)
+})
+xgb_results.to_csv("MMM_MODELING/outputs/test_predictions_xgb.csv", index=False)
+
 # %%
 # 9) RESIDUAL DIAGNOSTICS
 residuals = y_test - y_pred_test
@@ -141,21 +162,26 @@ plt.figure(figsize=(10,3))
 plt.plot(data['date'].iloc[train_end:], residuals)
 plt.axhline(0, color='k', linestyle='--')
 plt.title("Residuals (log revenue)")
+plt.savefig("MMM_MODELING/outputs/plots/residuals.png", dpi=300, bbox_inches="tight")
 plt.show()
 
 sm.graphics.tsa.plot_acf(residuals, lags=12)
+plt.savefig("MMM_MODELING/outputs/plots/residuals_acf.png", dpi=300, bbox_inches="tight")
 plt.show()
 
 # %%
 # 10) SENSITIVITY ANALYSIS: PRICE
 base = X_test.copy()
+sensitivity_price = []
 for change in [-0.1, -0.05, 0, 0.05, 0.1]:
     tmp = base.copy()
     if 'average_price' in tmp.columns:
         tmp['average_price'] = tmp['average_price'] * (1+change)
         pred = ridge_cv.predict(tmp)
         mean_rev = np.mean(np.expm1(pred))
-        print(f"Price change {change*100:.0f}% -> mean revenue {mean_rev:.2f}")
+        sensitivity_price.append({"change": change, "mean_revenue": mean_rev})
+
+pd.DataFrame(sensitivity_price).to_csv("MMM_MODELING/outputs/sensitivity_price.csv", index=False)
 
 # %%
 # 11) SENSITIVITY ANALYSIS: PROMOTIONS
@@ -165,7 +191,8 @@ if 'promotions' in X_test.columns:
     pred_off = ridge_cv.predict(tmp)
     tmp['promotions'] = 1
     pred_on = ridge_cv.predict(tmp)
-    print("Promotion effect (avg revenue):",
-          np.mean(np.expm1(pred_on)) - np.mean(np.expm1(pred_off)))
+    promo_effect = np.mean(np.expm1(pred_on)) - np.mean(np.expm1(pred_off))
+    with open("MMM_MODELING/outputs/sensitivity_promotions.txt", "w") as f:
+        f.write(f"Average revenue lift due to promotions: {promo_effect:.2f}\n")
 
 # %%
